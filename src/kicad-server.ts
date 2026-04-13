@@ -462,7 +462,8 @@ class KiCADServer {
         });
       }
 
-      // Set a timeout
+      // Set a timeout (configurable via MCP_COMMAND_TIMEOUT env var, default 30s)
+      const commandTimeoutMs = parseInt(process.env.MCP_COMMAND_TIMEOUT || "30000", 10);
       const timeout = setTimeout(() => {
         console.error(`Command timeout: ${request.command}`);
 
@@ -478,8 +479,8 @@ class KiCADServer {
         setTimeout(() => this.processNextRequest(), 0);
 
         // Reject the promise
-        reject(new Error(`Command timeout: ${request.command}`));
-      }, 30000); // 30 seconds timeout
+        reject(new Error(`Command timeout after ${commandTimeoutMs / 1000}s: ${request.command}`));
+      }, commandTimeoutMs);
 
       // Write the request to the Python process
       console.error(`Sending request: ${requestStr}`);
