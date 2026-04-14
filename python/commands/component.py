@@ -164,6 +164,123 @@ class ComponentCommands:
                 "errorDetails": str(e),
             }
 
+    def load_footprints(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Load footprints directly onto the board using absolute library paths.
+
+        Bypasses the LibraryManager entirely — uses pcbnew.FootprintLoad()
+        with the .pretty directory path and footprint name. This is the
+        programmatic equivalent of KiCad's F8 'Update PCB from Schematic'
+        for adding footprints to a fresh board.
+
+        Parameters:
+            components: list of dicts, each with:
+                - reference: str (e.g., "U1", "R1")
+                - library_path: str (absolute path to .pretty directory)
+                - footprint_name: str (name without .kicad_mod)
+                - x: float (mm)
+                - y: float (mm)
+                - rotation: float (degrees, optional, default 0)
+                - value: str (optional component value)
+        """
+        try:
+            if not self.board:
+                return {
+                    "success": False,
+                    "message": "No board is loaded",
+                    "errorDetails": "Load or create a board first",
+                }
+
+            components = params.get("components", [])
+            if not components:
+                return {
+                    "success": False,
+                    "message": "No components provided",
+                    "errorDetails": "Provide a 'components' list",
+                }
+
+            results = []
+            for comp in components:
+                ref = comp.get("reference", "")
+                lib_path = comp.get("library_path", "")
+                fp_name = comp.get("footprint_name", "")
+                x = comp.get("x", 0.0)
+                y = comp.get("y", 0.0)
+                rotation = comp.get("rotation", 0.0)
+                value = comp.get("value", "")
+
+                if not ref or not lib_path or not fp_name:
+                    results.append({
+                        "reference": ref,
+                        "success": False,
+                        "error": "Missing reference, library_path, or footprint_name",
+                    })
+                    continue
+
+                try:
+                    module = pcbnew.FootprintLoad(lib_path, fp_name)
+                    if not module:
+                        results.append({
+                            "reference": ref,
+                            "success": False,
+                            "error": f"FootprintLoad returned None for {lib_path}/{fp_name}",
+                        })
+                        continue
+
+                    module.SetReference(ref)
+                    if value:
+                        module.SetValue(value)
+
+                    # Position in nanometers
+                    x_nm = int(x * 1000000)
+                    y_nm = int(y * 1000000)
+                    module.SetPosition(pcbnew.VECTOR2I(x_nm, y_nm))
+
+                    # Rotation
+                    if rotation != 0:
+                        angle = pcbnew.EDA_ANGLE(rotation, pcbnew.DEGREES_T)
+                        module.SetOrientation(angle)
+
+                    # Set FPID so KiCad knows which library this came from
+                    # Extract library nickname from the .pretty directory name
+                    lib_dir_name = os.path.basename(lib_path)
+                    lib_nickname = lib_dir_name.replace(".pretty", "")
+                    fpid = pcbnew.LIB_ID(lib_nickname, fp_name)
+                    module.SetFPID(fpid)
+
+                    self.board.Add(module)
+                    results.append({
+                        "reference": ref,
+                        "success": True,
+                        "footprint": f"{lib_nickname}:{fp_name}",
+                        "position": {"x": x, "y": y},
+                    })
+                except Exception as e:
+                    results.append({
+                        "reference": ref,
+                        "success": False,
+                        "error": str(e),
+                    })
+
+            # Save the board
+            self.board.Save(self.board.GetFileName())
+
+            succeeded = sum(1 for r in results if r["success"])
+            failed = sum(1 for r in results if not r["success"])
+
+            return {
+                "success": failed == 0,
+                "message": f"Loaded {succeeded} footprints ({failed} failed)",
+                "components": results,
+            }
+
+        except Exception as e:
+            logger.error(f"Error loading footprints: {str(e)}")
+            return {
+                "success": False,
+                "message": "Failed to load footprints",
+                "errorDetails": str(e),
+            }
+
     def move_component(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Move an existing component to a new position"""
         try:

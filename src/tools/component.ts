@@ -73,6 +73,51 @@ export function registerComponentTools(server: McpServer, callKicadScript: Comma
   );
 
   // ------------------------------------------------------
+  // Load Footprints Tool
+  // ------------------------------------------------------
+  server.tool(
+    "load_footprints",
+    "Load footprints directly onto the board using absolute .pretty library paths. " +
+      "Bypasses the footprint library manager — uses pcbnew.FootprintLoad() with " +
+      "direct paths. This is the programmatic equivalent of KiCad's F8 " +
+      "'Update PCB from Schematic' for adding footprints to a fresh board.",
+    {
+      components: z
+        .array(
+          z.object({
+            reference: z.string().describe("Reference designator (e.g., 'U1', 'R1')"),
+            library_path: z
+              .string()
+              .describe("Absolute path to the .pretty footprint library directory"),
+            footprint_name: z
+              .string()
+              .describe("Footprint name without .kicad_mod extension"),
+            x: z.number().describe("X position in mm"),
+            y: z.number().describe("Y position in mm"),
+            rotation: z.number().optional().describe("Rotation in degrees (default 0)"),
+            value: z.string().optional().describe("Component value (e.g., '4.7k', '100nF')"),
+          }),
+        )
+        .describe("List of components to load onto the board"),
+    },
+    async ({ components }) => {
+      logger.debug(`Loading ${components.length} footprints onto board`);
+      const result = await callKicadScript("load_footprints", {
+        components,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    },
+  );
+
+  // ------------------------------------------------------
   // Move Component Tool
   // ------------------------------------------------------
   server.tool(

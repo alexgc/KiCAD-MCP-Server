@@ -324,6 +324,7 @@ class KiCADInterface:
             "place_component_array": self.component_commands.place_component_array,
             "align_components": self.component_commands.align_components,
             "duplicate_component": self.component_commands.duplicate_component,
+            "load_footprints": self.component_commands.load_footprints,
             # Routing commands
             "add_net": self.routing_commands.add_net,
             "route_trace": self.routing_commands.route_trace,
@@ -547,6 +548,7 @@ class KiCADInterface:
     # Board-mutating commands that trigger auto-save on SWIG path
     _BOARD_MUTATING_COMMANDS = {
         "place_component",
+        "load_footprints",
         "move_component",
         "rotate_component",
         "delete_component",
