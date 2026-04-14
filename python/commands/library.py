@@ -93,7 +93,9 @@ class LibraryManager:
 
             # Simple regex-based parser for lib entries
             # Pattern: (lib (name "NAME")(type TYPE)(uri "URI")...)
-            lib_pattern = r'\(lib\s+\(name\s+"?([^")\s]+)"?\)\s*\(type\s+"?([^")\s]+)"?\)\s*\(uri\s+"?([^")\s]+)"?'
+            # URI may contain spaces (e.g., C:/Program Files/...) so
+            # use [^"] when quoted, [^")\s]+ when unquoted
+            lib_pattern = r'\(lib\s+\(name\s+"?([^")\s]+)"?\)\s*\(type\s+"?([^")\s]+)"?\)\s*\(uri\s+"([^"]+)"'
 
             for match in re.finditer(lib_pattern, content, re.IGNORECASE):
                 nickname = match.group(1)
