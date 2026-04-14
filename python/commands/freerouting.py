@@ -91,8 +91,49 @@ def _build_freerouting_cmd(
     ses_path: str,
     passes: int,
     use_docker: bool,
+    *,
+    threads: Optional[int] = None,
+    optimization_strategy: str = "hybrid",
+    hybrid_ratio: str = "2:1",
+    item_selection: str = "prioritized",
+    improvement_threshold: Optional[float] = None,
+    drc_output: Optional[str] = None,
 ) -> List[str]:
-    """Build the command to run Freerouting."""
+    """Build the command to run Freerouting.
+
+    Args:
+        jar_path: Path to freerouting JAR.
+        dsn_path: Input Specctra DSN file.
+        ses_path: Output Specctra SES file.
+        passes: Maximum autorouter passes.
+        use_docker: Run via Docker/Podman container.
+        threads: Thread pool size for optimization (default: CPU count - 1).
+        optimization_strategy: "greedy", "global", or "hybrid".
+        hybrid_ratio: Ratio for hybrid strategy (e.g. "2:1").
+        item_selection: "sequential", "random", or "prioritized".
+        improvement_threshold: Minimum improvement % to continue (e.g. 0.01).
+        drc_output: Path to write DRC report in KiCad JSON format.
+    """
+    def _routing_args(de: str, do: str, drc: Optional[str]) -> List[str]:
+        """Build the routing-specific argument list."""
+        args: List[str] = [
+            "--gui.enabled=false",
+            "-de", de,
+            "-do", do,
+            "-mp", str(passes),
+            "-us", optimization_strategy,
+        ]
+        if optimization_strategy == "hybrid":
+            args += ["-hr", hybrid_ratio]
+        args += ["-is", item_selection]
+        if threads is not None:
+            args += ["-mt", str(threads)]
+        if improvement_threshold is not None:
+            args += ["-oit", str(improvement_threshold)]
+        if drc is not None:
+            args += ["-drc", drc]
+        return args
+
     if use_docker:
         docker_exe = _find_docker()
         if docker_exe is None:
@@ -101,40 +142,26 @@ def _build_freerouting_cmd(
         dsn_name = os.path.basename(dsn_path)
         ses_name = os.path.basename(ses_path)
         jar_name = os.path.basename(jar_path)
+        drc_container = f"/work/{os.path.basename(drc_output)}" if drc_output else None
+
         return [
             docker_exe,
             "run",
             "--rm",
-            "-v",
-            f"{jar_path}:/app/{jar_name}:ro",
-            "-v",
-            f"{board_dir}:/work",
+            "-v", f"{jar_path}:/app/{jar_name}:ro",
+            "-v", f"{board_dir}:/work",
             DOCKER_IMAGE,
             "java",
-            "-jar",
-            f"/app/{jar_name}",
-            "-de",
-            f"/work/{dsn_name}",
-            "-do",
-            f"/work/{ses_name}",
-            "-mp",
-            str(passes),
-        ]
+            "-jar", f"/app/{jar_name}",
+        ] + _routing_args(f"/work/{dsn_name}", f"/work/{ses_name}", drc_container)
     else:
         java_exe = _find_java()
         if java_exe is None:
             raise RuntimeError("Java executable not found")
         return [
             java_exe,
-            "-jar",
-            jar_path,
-            "-de",
-            dsn_path,
-            "-do",
-            ses_path,
-            "-mp",
-            str(passes),
-        ]
+            "-jar", jar_path,
+        ] + _routing_args(dsn_path, ses_path, drc_output)
 
 
 class FreeroutingCommands:
@@ -210,6 +237,12 @@ class FreeroutingCommands:
         jar_path = params.get("freeroutingJar", DEFAULT_FREEROUTING_JAR)
         timeout = params.get("timeout", 300)
         passes = params.get("maxPasses", 20)
+        threads = params.get("threads")
+        optimization_strategy = params.get("optimizationStrategy", "hybrid")
+        hybrid_ratio = params.get("hybridRatio", "2:1")
+        item_selection = params.get("itemSelection", "prioritized")
+        improvement_threshold = params.get("improvementThreshold")
+        drc_output = params.get("drcOutput")
 
         # Validate Freerouting JAR
         if not os.path.isfile(jar_path):
@@ -268,7 +301,22 @@ class FreeroutingCommands:
         logger.info(f"DSN exported: {dsn_size} bytes")
 
         # Step 2: Run Freerouting
-        cmd = _build_freerouting_cmd(jar_path, dsn_path, ses_path, passes, use_docker)
+        drc_path = None
+        if drc_output:
+            drc_path = drc_output
+        cmd = _build_freerouting_cmd(
+            jar_path,
+            dsn_path,
+            ses_path,
+            passes,
+            use_docker,
+            threads=threads,
+            optimization_strategy=optimization_strategy,
+            hybrid_ratio=hybrid_ratio,
+            item_selection=item_selection,
+            improvement_threshold=improvement_threshold,
+            drc_output=drc_path,
+        )
 
         mode_label = "docker" if use_docker else "direct"
         logger.info(f"Running Freerouting ({mode_label}): {' '.join(cmd)}")
@@ -352,7 +400,7 @@ class FreeroutingCommands:
             else:
                 track_count += 1
 
-        return {
+        result_dict: Dict[str, Any] = {
             "success": True,
             "message": f"Autoroute completed in {elapsed}s",
             "mode": mode_label,
@@ -365,6 +413,12 @@ class FreeroutingCommands:
             },
             "freerouting_stdout": (proc.stdout[:1000] if proc.stdout else ""),
         }
+
+        # Include DRC report path if freerouting generated one
+        if drc_path and os.path.isfile(drc_path):
+            result_dict["drc_report_path"] = drc_path
+
+        return result_dict
 
     def export_dsn(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Export the board to Specctra DSN format only."""
